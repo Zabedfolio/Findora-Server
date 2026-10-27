@@ -43,12 +43,23 @@ const itemSchema = new mongoose.Schema(
       enum: ["active", "resolved", "claimed"],
       default: "active",
     },
-    // You can add postedBy later when you want to connect with BetterAuth user
+    postedBy: {
+      userId: { type: String, default: "" },
+      name: { type: String, default: "Anonymous" },
+      email: { type: String, default: "" },
+      image: { type: String, default: "/default-avatar.png" },
+    },
   },
   {
     timestamps: true, // automatically adds createdAt and updatedAt
   },
 );
+
+itemSchema.index({ type: 1, status: 1 });
+itemSchema.index({ "postedBy.userId": 1 });
+itemSchema.index({ "postedBy.email": 1 });
+itemSchema.index({ category: 1 });
+itemSchema.index({ createdAt: -1 });
 
 const Item = mongoose.model("Item", itemSchema);
 

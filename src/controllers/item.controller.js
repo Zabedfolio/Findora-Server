@@ -4,7 +4,19 @@ import Item from "../models/item.model.js";
 // Create new lost/found item
 export const createItem = async (req, res) => {
   try {
-    const item = await Item.create(req.body);
+    const itemData = { ...req.body };
+
+    // Support frontend owner object mapping
+    if (req.body.owner && !req.body.postedBy) {
+      itemData.postedBy = {
+        userId: req.body.owner.id || req.body.owner._id || "",
+        name: req.body.owner.name || "Anonymous",
+        email: req.body.owner.email || "",
+        image: req.body.owner.avatar || req.body.owner.image || "/default-avatar.png",
+      };
+    }
+
+    const item = await Item.create(itemData);
 
     res.status(201).json({
       success: true,
@@ -22,7 +34,7 @@ export const createItem = async (req, res) => {
 // Get all items (with optional filters)
 export const getAllItems = async (req, res) => {
   try {
-    const { type, category, location, status, search } = req.query;
+    const { type, category, location, status, search, userId, email } = req.query;
 
     const filter = {};
 
@@ -30,6 +42,8 @@ export const getAllItems = async (req, res) => {
     if (category) filter.category = category;
     if (location) filter.location = { $regex: location, $options: "i" };
     if (status) filter.status = status;
+    if (userId) filter["postedBy.userId"] = userId;
+    if (email) filter["postedBy.email"] = email;
 
     if (search) {
       filter.$text = { $search: search };
