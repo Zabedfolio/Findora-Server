@@ -49,6 +49,22 @@ const itemSchema = new mongoose.Schema(
       email: { type: String, default: "" },
       image: { type: String, default: "/default-avatar.png" },
     },
+    contact: {
+      phone: { type: String, default: "" },
+      preferredMethod: {
+        type: String,
+        enum: ["phone", "email", "chat"],
+        default: "email",
+      },
+    },
+    coordinates: {
+      lat: { type: Number },
+      lng: { type: Number },
+    },
+    claimCount: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true, // automatically adds createdAt and updatedAt

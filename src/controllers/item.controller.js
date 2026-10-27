@@ -34,22 +34,32 @@ export const createItem = async (req, res) => {
 // Get all items (with optional filters)
 export const getAllItems = async (req, res) => {
   try {
-    const { type, category, location, status, search, userId, email } = req.query;
+    const { type, category, location, status, search, userId, email, limit } = req.query;
 
     const filter = {};
 
     if (type) filter.type = type;
-    if (category) filter.category = category;
-    if (location) filter.location = { $regex: location, $options: "i" };
-    if (status) filter.status = status;
+    if (category && category !== "All Categories") filter.category = category;
+    if (location && location !== "All Locations") filter.location = { $regex: location, $options: "i" };
+    if (status && status !== "all") filter.status = status;
     if (userId) filter["postedBy.userId"] = userId;
     if (email) filter["postedBy.email"] = email;
 
-    if (search) {
-      filter.$text = { $search: search };
+    if (search && search.trim()) {
+      filter.$or = [
+        { title: { $regex: search.trim(), $options: "i" } },
+        { description: { $regex: search.trim(), $options: "i" } },
+        { location: { $regex: search.trim(), $options: "i" } },
+      ];
     }
 
-    const items = await Item.find(filter).sort({ createdAt: -1 });
+    let query = Item.find(filter).sort({ createdAt: -1 });
+
+    if (limit && Number(limit) > 0) {
+      query = query.limit(Number(limit));
+    }
+
+    const items = await query.exec();
 
     res.status(200).json({
       success: true,
