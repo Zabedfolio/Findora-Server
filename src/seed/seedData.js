@@ -3,6 +3,9 @@ import dotenv from "dotenv";
 import Item from "../models/item.model.js";
 import Claim from "../models/claim.model.js";
 import Handover from "../models/handover.model.js";
+import Review from "../models/review.model.js";
+import FraudCase from "../models/fraud.model.js";
+import Notification from "../models/notification.model.js";
 
 dotenv.config();
 
@@ -151,10 +154,13 @@ export async function runSeeder() {
     }
     console.log("✅ 10 Demo Users seeded with password 'DemoPass123!' and flagged status.");
 
-    // 2. Clear previous demo seed data in Item, Claim, Handover (preserving user-created documents)
+    // 2. Clear previous demo seed data in Item, Claim, Handover, Review, FraudCase, Notification
     await Item.deleteMany({ "postedBy.userId": { $in: DEMO_USERS.map((u) => u._id) } });
     await Claim.deleteMany({ "claimant.userId": { $in: DEMO_USERS.map((u) => u._id) } });
     await Handover.deleteMany({ "owner.userId": { $in: DEMO_USERS.map((u) => u._id) } });
+    await Review.deleteMany({});
+    await FraudCase.deleteMany({});
+    await Notification.deleteMany({});
 
     // 3. Seed 12 Lost Items
     console.log("Seeding 12 Lost Items...");
@@ -1315,6 +1321,416 @@ export async function runSeeder() {
     const insertedHandovers = await Handover.insertMany(handoverDocs);
     console.log(`✅ ${insertedHandovers.length} Handovers seeded.`);
 
+    // 7. Seed Reviews
+    console.log("Seeding Reviews...");
+    const reviewDocs = [
+      {
+        reviewer: {
+          userId: "usr_demo_01",
+          name: "Alex Rivera",
+          email: "demo.alex@findora.app",
+          avatar: DEMO_USERS[0].image,
+          role: "Full-Stack Developer",
+        },
+        targetUser: {
+          userId: "usr_demo_02",
+          name: "Tariqul Islam",
+          email: "demo.tariq@findora.app",
+        },
+        targetItem: {
+          itemId: insertedFound[0]._id,
+          title: insertedFound[0].title,
+        },
+        handoverId: insertedHandovers[0]._id,
+        rating: 5,
+        comment: "Findora's verification workflow made returning my lost wallet smooth and secure. Incredible handover protocol!",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 2),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_03",
+          name: "Sarah Jenkins",
+          email: "demo.sarah@findora.app",
+          avatar: DEMO_USERS[2].image,
+          role: "Community Member",
+        },
+        targetUser: {
+          userId: "usr_demo_02",
+          name: "Tariqul Islam",
+          email: "demo.tariq@findora.app",
+        },
+        targetItem: {
+          itemId: insertedLost[2]._id,
+          title: insertedLost[2].title,
+        },
+        rating: 5,
+        comment: "Found a set of keys near the park and returned them within an hour. The handover scheduler is top-notch.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 4),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_05",
+          name: "Farhana Yasmin",
+          email: "demo.farhana@findora.app",
+          avatar: DEMO_USERS[4].image,
+          role: "Verified Finder",
+        },
+        targetUser: {
+          userId: "usr_demo_08",
+          name: "Nusrat Jahan",
+          email: "demo.nusrat@findora.app",
+        },
+        targetItem: {
+          itemId: insertedFound[7]._id,
+          title: insertedFound[7].title,
+        },
+        rating: 5,
+        comment: "Replied fast and met me at a public police booth for the handover. Highly recommended community member!",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 5),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_07",
+          name: "Kamrul Hasan",
+          email: "demo.kamrul@findora.app",
+          avatar: DEMO_USERS[6].image,
+          role: "Community User",
+        },
+        targetUser: {
+          userId: "usr_demo_06",
+          name: "Nafis Fuad",
+          email: "demo.nafis@findora.app",
+        },
+        targetItem: {
+          itemId: insertedFound[5]._id,
+          title: insertedFound[5].title,
+        },
+        rating: 5,
+        comment: "Got my prescription glasses back safely at Dhanmondi. Honest and punctual finder.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 6),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_04",
+          name: "Rahim Chowdhury",
+          email: "demo.rahim@findora.app",
+          avatar: DEMO_USERS[3].image,
+          role: "Student",
+        },
+        targetUser: {
+          userId: "usr_demo_01",
+          name: "Alex Rivera",
+          email: "demo.alex@findora.app",
+        },
+        rating: 5,
+        comment: "Reunited my backpack with all my lecture notes. The community trust system works amazingly well.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 7),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_08",
+          name: "Nusrat Jahan",
+          email: "demo.nusrat@findora.app",
+          avatar: DEMO_USERS[7].image,
+          role: "Verified Member",
+        },
+        targetUser: {
+          userId: "usr_demo_04",
+          name: "Rahim Chowdhury",
+          email: "demo.rahim@findora.app",
+        },
+        rating: 4,
+        comment: "Smooth coordination through the safe handover system. Met right inside the mall lobby under security.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 8),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_06",
+          name: "Nafis Fuad",
+          email: "demo.nafis@findora.app",
+          avatar: DEMO_USERS[5].image,
+          role: "Frequent Finder",
+        },
+        targetUser: {
+          userId: "usr_demo_07",
+          name: "Kamrul Hasan",
+          email: "demo.kamrul@findora.app",
+        },
+        rating: 5,
+        comment: "Quick verification and accurate answers to the secret identification questions.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 9),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_02",
+          name: "Tariqul Islam",
+          email: "demo.tariq@findora.app",
+          avatar: DEMO_USERS[1].image,
+          role: "Verified Member",
+        },
+        targetUser: {
+          userId: "usr_demo_03",
+          name: "Sarah Jenkins",
+          email: "demo.sarah@findora.app",
+        },
+        rating: 5,
+        comment: "Owner came with original purchase receipt. Pleasant and safe exchange experience.",
+        status: "published",
+        createdAt: new Date(Date.now() - 86400000 * 10),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_09",
+          name: "Tanvir Hasan (Suspicious)",
+          email: "demo.suspicious@findora.app",
+          avatar: DEMO_USERS[8].image,
+          role: "Flagged User",
+        },
+        targetUser: {
+          userId: "usr_demo_05",
+          name: "Farhana Yasmin",
+          email: "demo.farhana@findora.app",
+        },
+        rating: 1,
+        comment: "Refused to come to my dark alley meeting spot. Waste of my time!",
+        status: "flagged",
+        flagReason: "Inappropriate / Extortion attempt / Suspicious meeting demand",
+        reportCount: 4,
+        createdAt: new Date(Date.now() - 3600000 * 6),
+      },
+      {
+        reviewer: {
+          userId: "usr_demo_10",
+          name: "Spam Claimant (Flagged)",
+          email: "demo.spammer@findora.app",
+          avatar: DEMO_USERS[9].image,
+          role: "Spammer",
+        },
+        targetUser: {
+          userId: "usr_demo_04",
+          name: "Rahim Chowdhury",
+          email: "demo.rahim@findora.app",
+        },
+        rating: 1,
+        comment: "Declined my fake claim! Join telegram t.me/fast_claim_recovery for automated claim tools.",
+        status: "flagged",
+        flagReason: "Spam & unauthorized promotion",
+        reportCount: 5,
+        createdAt: new Date(Date.now() - 3600000 * 12),
+      },
+    ];
+
+    const insertedReviews = await Review.insertMany(reviewDocs);
+    console.log(`✅ ${insertedReviews.length} Reviews seeded.`);
+
+    // 8. Seed Fraud Cases (for Admin Trust & Safety Console)
+    console.log("Seeding Fraud Cases...");
+    const fraudDocs = [
+      {
+        caseId: "FRD-501",
+        targetUser: {
+          userId: "usr_demo_10",
+          name: "Spam Claimant (Flagged)",
+          email: "demo.spammer@findora.app",
+          avatar: DEMO_USERS[9].image,
+        },
+        reportedBy: {
+          userId: "system",
+          name: "Automated AI Shield",
+        },
+        targetType: "claim",
+        triggerReason: "Multi-claim surge: 6 MacBook Pro and iPad reports claimed within 30 minutes",
+        riskScore: 94,
+        riskLevel: "critical",
+        evidence: "User submitted identical unlock passcode '1234' and generic descriptions across 6 separate high-value electronics.",
+        deviceFingerprint: "Headless Chrome on Linux (Automated Bot)",
+        ipAddress: "103.205.71.18",
+        status: "investigating",
+        totalClaims: 14,
+        disputesCount: 6,
+      },
+      {
+        caseId: "FRD-502",
+        targetUser: {
+          userId: "usr_demo_09",
+          name: "Tanvir Hasan (Suspicious)",
+          email: "demo.suspicious@findora.app",
+          avatar: DEMO_USERS[8].image,
+        },
+        reportedBy: {
+          userId: "usr_demo_05",
+          name: "Farhana Yasmin",
+          email: "demo.farhana@findora.app",
+        },
+        targetType: "handover",
+        triggerReason: "Isolated venue and midnight meeting proposal on high-value jewelry",
+        riskScore: 91,
+        riskLevel: "critical",
+        evidence: "Proposed meeting behind old bus depot in an unlit alley at 11:45 PM and requested owner come alone without phone.",
+        deviceFingerprint: "Mobile Safari / VPN IP detected",
+        ipAddress: "185.220.101.5",
+        status: "investigating",
+        totalClaims: 3,
+        disputesCount: 2,
+      },
+      {
+        caseId: "FRD-503",
+        targetUser: {
+          userId: "usr_demo_09",
+          name: "Tanvir Hasan (Suspicious)",
+          email: "demo.suspicious@findora.app",
+          avatar: DEMO_USERS[8].image,
+        },
+        reportedBy: {
+          userId: "system",
+          name: "Image Forensics AI",
+        },
+        targetType: "item",
+        triggerReason: "Stock photo fraud: Image matches Shutterstock commercial jewelry catalog",
+        riskScore: 82,
+        riskLevel: "high",
+        evidence: "Uploaded item image for Gold Chain with Diamond Pendant has matching EXIF metadata with commercial stock photography.",
+        deviceFingerprint: "Firefox on Windows",
+        ipAddress: "103.114.98.24",
+        status: "investigating",
+        totalClaims: 5,
+        disputesCount: 1,
+      },
+      {
+        caseId: "FRD-504",
+        targetUser: {
+          userId: "usr_demo_10",
+          name: "Spam Claimant (Flagged)",
+          email: "demo.spammer@findora.app",
+          avatar: DEMO_USERS[9].image,
+        },
+        reportedBy: {
+          userId: "usr_demo_04",
+          name: "Rahim Chowdhury",
+          email: "demo.rahim@findora.app",
+        },
+        targetType: "claim",
+        triggerReason: "Fraudulent ownership claim on University DU Transcripts folder",
+        riskScore: 78,
+        riskLevel: "high",
+        evidence: "Claimant claimed transcripts belonged to them but gave wrong graduation year and department name.",
+        deviceFingerprint: "Chrome on Android",
+        ipAddress: "103.45.12.89",
+        status: "actioned",
+        actionNotes: "Claim rejected and claimant warned by moderator.",
+        totalClaims: 8,
+        disputesCount: 3,
+      },
+      {
+        caseId: "FRD-505",
+        targetUser: {
+          userId: "usr_demo_09",
+          name: "Tanvir Hasan (Suspicious)",
+          email: "demo.suspicious@findora.app",
+          avatar: DEMO_USERS[8].image,
+        },
+        reportedBy: {
+          userId: "system",
+          name: "Geo-Anomaly Guard",
+        },
+        targetType: "item",
+        triggerReason: "Location spoofing: Post coordinates in Chittagong, IP address in Sylhet",
+        riskScore: 68,
+        riskLevel: "medium",
+        evidence: "Item reported found in Dhaka metro while device connection originated from international proxy pool.",
+        deviceFingerprint: "TOR Exit Node",
+        ipAddress: "192.42.116.16",
+        status: "dismissed",
+        actionNotes: "Verified as valid roaming connection.",
+        totalClaims: 2,
+        disputesCount: 0,
+      },
+    ];
+
+    const insertedFraudCases = await FraudCase.insertMany(fraudDocs);
+    console.log(`✅ ${insertedFraudCases.length} Fraud Cases seeded.`);
+
+    // 9. Seed Notifications
+    console.log("Seeding Notifications...");
+    const notificationDocs = [
+      {
+        recipientId: "usr_demo_01",
+        recipientEmail: "demo.alex@findora.app",
+        sender: { userId: "usr_demo_02", name: "Tariqul Islam" },
+        type: "claim_approved",
+        title: "Ownership Claim Approved!",
+        message: "Tariqul Islam approved your claim for Black Leather Bifold Wallet. You can now schedule a safe handover.",
+        link: "/dashboard/claims",
+        read: false,
+        createdAt: new Date(Date.now() - 3600000 * 2),
+      },
+      {
+        recipientId: "usr_demo_01",
+        recipientEmail: "demo.alex@findora.app",
+        sender: { userId: "usr_demo_02", name: "Tariqul Islam" },
+        type: "handover_proposed",
+        title: "Safe Handover Meeting Proposed",
+        message: "A meeting at Dhanmondi Police Station was proposed for your wallet. Tap to review.",
+        link: "/dashboard/handovers",
+        read: false,
+        createdAt: new Date(Date.now() - 3600000 * 4),
+      },
+      {
+        recipientId: "usr_demo_02",
+        recipientEmail: "demo.tariq@findora.app",
+        sender: { userId: "usr_demo_01", name: "Alex Rivera" },
+        type: "claim_received",
+        title: "New Claim Received",
+        message: "Alex Rivera submitted an ownership claim with NID proof for the Black Leather Wallet.",
+        link: "/dashboard/claims",
+        read: true,
+        createdAt: new Date(Date.now() - 86400000),
+      },
+      {
+        recipientId: "usr_demo_03",
+        recipientEmail: "demo.sarah@findora.app",
+        sender: { userId: "system", name: "Findora Radar" },
+        type: "radar_match",
+        title: "Radar High-Match Found! (98.4%)",
+        message: "A newly turned-in Sony Headphone in Uttara matches your lost report from 2 days ago.",
+        link: "/match-radar",
+        read: false,
+        createdAt: new Date(Date.now() - 3600000 * 8),
+      },
+      {
+        recipientId: "usr_demo_05",
+        recipientEmail: "demo.farhana@findora.app",
+        sender: { userId: "system", name: "Findora Trust Admin" },
+        type: "admin_warning",
+        title: "Hazardous Meeting Alert: Do Not Attend",
+        message: "A late-night isolated meeting was detected for your Gold Chain report. Our safety team intervened.",
+        link: "/dashboard/handovers",
+        read: false,
+        createdAt: new Date(Date.now() - 3600000 * 1),
+      },
+      {
+        recipientId: "usr_demo_07",
+        recipientEmail: "demo.kamrul@findora.app",
+        sender: { userId: "usr_demo_06", name: "Nafis Fuad" },
+        type: "handover_confirmed",
+        title: "Handover Confirmed!",
+        message: "Nafis Fuad confirmed the lunch meeting at Star Kabab for your Titanium Glasses.",
+        link: "/dashboard/handovers",
+        read: true,
+        createdAt: new Date(Date.now() - 86400000),
+      },
+    ];
+
+    const insertedNotifications = await Notification.insertMany(notificationDocs);
+    console.log(`✅ ${insertedNotifications.length} Notifications seeded.`);
+
     console.log("\n========================================================");
     console.log("🎉 DATABASE SEEDING COMPLETED SUCCESSFULLY!");
     console.log("========================================================");
@@ -1323,6 +1739,9 @@ export async function runSeeder() {
     console.log("Found Items seeded:", insertedFound.length);
     console.log("Claims seeded:", insertedClaims.length);
     console.log("Handovers seeded:", insertedHandovers.length);
+    console.log("Reviews seeded:", insertedReviews.length);
+    console.log("Fraud Cases seeded:", insertedFraudCases.length);
+    console.log("Notifications seeded:", insertedNotifications.length);
     console.log("========================================================\n");
 
     process.exit(0);
