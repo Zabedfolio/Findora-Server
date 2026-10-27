@@ -31,42 +31,112 @@ export const createItem = async (req, res) => {
   }
 };
 
-// Get all items (with optional filters)
+// Get all items (with optional filters, pagination, and type counts)
 export const getAllItems = async (req, res) => {
   try {
-    const { type, category, location, status, search, userId, email, limit } = req.query;
+    const {
+      type,
+      category,
+      location,
+      status,
+      search,
+      q,
+      userId,
+      email,
+      from,
+      to,
+      sort = "newest",
+      limit = 9,
+      page = 1,
+    } = req.query;
 
     const filter = {};
 
-    if (type) filter.type = type;
-    if (category && category !== "All Categories") filter.category = category;
-    if (location && location !== "All Locations") filter.location = { $regex: location, $options: "i" };
-    if (status && status !== "all") filter.status = status;
-    if (userId) filter["postedBy.userId"] = userId;
-    if (email) filter["postedBy.email"] = email;
+    // 1. Type filter (ignore if 'all' or empty)
+    if (type && type !== "all") {
+      filter.type = type.toLowerCase();
+    }
 
-    if (search && search.trim()) {
+    // 2. Category filter
+    if (category && category !== "All Categories") {
+      filter.category = category;
+    }
+
+    // 3. Location filter
+    if (location && location !== "All Locations") {
+      filter.location = { $regex: location, $options: "i" };
+    }
+
+    // 4. Status filter
+    if (status && status !== "all") {
+      filter.status = status;
+    }
+
+    // 5. User filter
+    if (userId) filter["postedBy.userId"] = userId;
+    if (email) filter["postedBy.email"] = email.toLowerCase();
+
+    // 6. Search query (search or q)
+    const searchTerm = (search || q || "").trim();
+    if (searchTerm) {
       filter.$or = [
-        { title: { $regex: search.trim(), $options: "i" } },
-        { description: { $regex: search.trim(), $options: "i" } },
-        { location: { $regex: search.trim(), $options: "i" } },
+        { title: { $regex: searchTerm, $options: "i" } },
+        { description: { $regex: searchTerm, $options: "i" } },
+        { location: { $regex: searchTerm, $options: "i" } },
+        { category: { $regex: searchTerm, $options: "i" } },
       ];
     }
 
-    let query = Item.find(filter).sort({ createdAt: -1 });
-
-    if (limit && Number(limit) > 0) {
-      query = query.limit(Number(limit));
+    // 7. Date range filter
+    if (from || to) {
+      filter.date = {};
+      if (from) filter.date.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        filter.date.$lte = toDate;
+      }
     }
 
-    const items = await query.exec();
+    // Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === "oldest") {
+      sortOption = { createdAt: 1 };
+    }
+
+    // Pagination
+    const numLimit = Number(limit) || 9;
+    const numPage = Math.max(Number(page) || 1, 1);
+    const skip = (numPage - 1) * numLimit;
+
+    // Base filter without type to accurately calculate tab counts (All, Lost, Found)
+    const baseFilter = { ...filter };
+    delete baseFilter.type;
+
+    const [items, totalFiltered, totalLost, totalFound] = await Promise.all([
+      Item.find(filter).sort(sortOption).skip(skip).limit(numLimit),
+      Item.countDocuments(filter),
+      Item.countDocuments({ ...baseFilter, type: "lost" }),
+      Item.countDocuments({ ...baseFilter, type: "found" }),
+    ]);
+
+    const typeCounts = {
+      all: totalLost + totalFound,
+      lost: totalLost,
+      found: totalFound,
+    };
 
     res.status(200).json({
       success: true,
-      count: items.length,
+      count: totalFiltered,
+      totalReports: totalFiltered,
+      totalPages: Math.max(1, Math.ceil(totalFiltered / numLimit)),
+      currentPage: numPage,
+      typeCounts,
       data: items,
     });
   } catch (error) {
+    console.error("Error in getAllItems:", error);
     res.status(500).json({
       success: false,
       message: error.message,
