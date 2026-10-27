@@ -72,19 +72,32 @@ export const getAllItems = async (req, res) => {
       filter.status = status;
     }
 
-    // 5. User filter
-    if (userId) filter["postedBy.userId"] = userId;
-    if (email) filter["postedBy.email"] = email.toLowerCase();
+    // 5. User filter and Search query
+    const andConditions = [];
 
-    // 6. Search query (search or q)
+    if (userId || email) {
+      const userMatches = [];
+      if (userId) userMatches.push({ "postedBy.userId": userId });
+      if (email) userMatches.push({ "postedBy.email": email.toLowerCase() });
+      if (userMatches.length > 0) {
+        andConditions.push({ $or: userMatches });
+      }
+    }
+
     const searchTerm = (search || q || "").trim();
     if (searchTerm) {
-      filter.$or = [
-        { title: { $regex: searchTerm, $options: "i" } },
-        { description: { $regex: searchTerm, $options: "i" } },
-        { location: { $regex: searchTerm, $options: "i" } },
-        { category: { $regex: searchTerm, $options: "i" } },
-      ];
+      andConditions.push({
+        $or: [
+          { title: { $regex: searchTerm, $options: "i" } },
+          { description: { $regex: searchTerm, $options: "i" } },
+          { location: { $regex: searchTerm, $options: "i" } },
+          { category: { $regex: searchTerm, $options: "i" } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
 
     // 7. Date range filter

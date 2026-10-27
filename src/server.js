@@ -25,6 +25,7 @@ app.get('/', (req, res) => {
 })
 
 app.use('/api/items', itemRouter)
+app.use('/api/reports', itemRouter)
 app.use('/api/dashboard', dashboardRouter)
 app.use('/api/claims', claimRouter)
 app.use('/api/handovers', handoverRouter)

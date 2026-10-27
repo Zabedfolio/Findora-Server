@@ -9,8 +9,7 @@ const claimSchema = new mongoose.Schema(
       index: true,
     },
     reportId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Item",
+      type: mongoose.Schema.Types.Mixed,
       required: true,
       index: true,
     },
