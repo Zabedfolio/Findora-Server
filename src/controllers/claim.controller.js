@@ -10,17 +10,126 @@ export const createClaim = async (req, res) => {
       claimData.claimNumber = `CLM-${Math.floor(100000 + Math.random() * 900000)}`;
     }
 
+    if (claimData.itemId && !claimData.reportId) {
+      claimData.reportId = claimData.itemId;
+    }
+
+    // Try to auto-populate item and finder details from the database if reportId is present
+    if (claimData.reportId) {
+      try {
+        let item = null;
+        if (claimData.reportId.match(/^[0-9a-fA-F]{24}$/)) {
+          item = await Item.findById(claimData.reportId);
+        } else {
+          item = await Item.findOne({ id: claimData.reportId });
+        }
+
+        if (item) {
+          if (!claimData.itemTitle || claimData.itemTitle === "Reported Item") {
+            claimData.itemTitle = item.title;
+          }
+          if (!claimData.itemThumbnail) {
+            claimData.itemThumbnail = item.images?.[0] || "";
+          }
+          if (!claimData.category) {
+            claimData.category = item.category || "General";
+          }
+          if (!claimData.location) {
+            claimData.location = item.location || "";
+          }
+          if (!claimData.finder || claimData.finder.userId === "usr_finder") {
+            claimData.finder = {
+              userId: item.postedBy?.userId || "finder",
+              name: item.postedBy?.name || "Item Finder",
+              email: item.postedBy?.email || "",
+              phone: item.contact?.phone || "",
+              avatar: item.postedBy?.image || "/default-avatar.png",
+            };
+          }
+        }
+      } catch (itemLookupErr) {
+        console.warn("Item lookup during claim creation skipped:", itemLookupErr.message);
+      }
+    }
+
+    // Support both id and userId for claimant
+    if (claimData.claimant) {
+      claimData.claimant.userId =
+        claimData.claimant.userId || claimData.claimant.id || claimData.claimant._id || "usr_claimant";
+      claimData.claimant.name = claimData.claimant.name || "Claimant";
+      claimData.claimant.email = (claimData.claimant.email || "").toLowerCase();
+      claimData.claimant.avatar = claimData.claimant.avatar || "/default-avatar.png";
+    } else {
+      claimData.claimant = { userId: "usr_claimant", name: "Claimant", email: "", avatar: "/default-avatar.png" };
+    }
+
+    // Support both id and userId for finder
+    if (claimData.finder) {
+      claimData.finder.userId =
+        claimData.finder.userId || claimData.finder.id || claimData.finder._id || "usr_finder";
+      claimData.finder.name = claimData.finder.name || "Finder";
+      claimData.finder.email = (claimData.finder.email || "").toLowerCase();
+      claimData.finder.avatar = claimData.finder.avatar || "/default-avatar.png";
+    } else {
+      claimData.finder = { userId: "usr_finder", name: "Finder", email: "", avatar: "/default-avatar.png" };
+    }
+
+    // Map description / proofText to claimantProof
+    const proofDesc =
+      claimData.proofText ||
+      claimData.description ||
+      (claimData.claimantProof && claimData.claimantProof.description) ||
+      "Verification proof details submitted by claimant.";
+
+    const proofPhoto =
+      claimData.proofPhotoUrl ||
+      claimData.proofImage ||
+      (claimData.claimantProof && claimData.claimantProof.proofPhotoUrl) ||
+      "";
+
+    const addProof =
+      claimData.additionalProof ||
+      claimData.lostLocationTime ||
+      (claimData.claimantProof && claimData.claimantProof.additionalProof) ||
+      "";
+
+    claimData.claimantProof = {
+      description: proofDesc,
+      proofPhotoUrl: proofPhoto,
+      additionalProof: addProof,
+      secretAnswers: claimData.secretAnswers || (claimData.claimantProof?.secretAnswers) || [],
+      submittedAt: new Date(),
+    };
+
+    if (!claimData.timeline || claimData.timeline.length === 0) {
+      claimData.timeline = [
+        {
+          step: 1,
+          title: "Claim Submitted",
+          time: "Just now",
+          description: "Ownership proof submitted to the finder.",
+          completed: true,
+          current: true,
+        },
+      ];
+    }
+
     const claim = await Claim.create(claimData);
 
-    // Increment claimCount on the Item
-    if (claim.reportId) {
-      await Item.findByIdAndUpdate(claim.reportId, { $inc: { claimCount: 1 } });
+    // Increment claimCount on the Item if valid ObjectId
+    if (claim.reportId && String(claim.reportId).match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        await Item.findByIdAndUpdate(claim.reportId, { $inc: { claimCount: 1 } });
+      } catch {}
     }
+
+    const claimObj = claim.toObject();
+    claimObj.id = claim._id.toString();
 
     res.status(201).json({
       success: true,
       message: "Ownership claim submitted successfully",
-      data: claim,
+      data: claimObj,
     });
   } catch (error) {
     res.status(400).json({
@@ -43,7 +152,7 @@ export const getMyClaims = async (req, res) => {
       });
     }
 
-    const filter = {};
+    const andConditions = [];
 
     const userMatches = [];
     if (userId) {
@@ -59,15 +168,17 @@ export const getMyClaims = async (req, res) => {
       const outMatches = [];
       if (userId) outMatches.push({ "claimant.userId": userId });
       if (email) outMatches.push({ "claimant.email": email.toLowerCase() });
-      filter.$or = outMatches;
+      if (outMatches.length > 0) andConditions.push({ $or: outMatches });
     } else if (type === "incoming") {
       const inMatches = [];
       if (userId) inMatches.push({ "finder.userId": userId });
       if (email) inMatches.push({ "finder.email": email.toLowerCase() });
-      filter.$or = inMatches;
+      if (inMatches.length > 0) andConditions.push({ $or: inMatches });
     } else {
-      filter.$or = userMatches;
+      if (userMatches.length > 0) andConditions.push({ $or: userMatches });
     }
+
+    const filter = {};
 
     if (status && status !== "all") {
       if (status === "actionable") {
@@ -82,16 +193,28 @@ export const getMyClaims = async (req, res) => {
     }
 
     if (q && q.trim()) {
-      filter.$or = [
-        { itemTitle: { $regex: q.trim(), $options: "i" } },
-        { claimNumber: { $regex: q.trim(), $options: "i" } },
-        { location: { $regex: q.trim(), $options: "i" } },
-      ];
+      andConditions.push({
+        $or: [
+          { itemTitle: { $regex: q.trim(), $options: "i" } },
+          { claimNumber: { $regex: q.trim(), $options: "i" } },
+          { location: { $regex: q.trim(), $options: "i" } },
+        ],
+      });
     }
 
-    const claims = await Claim.find(filter).sort({ createdAt: -1 });
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
+    }
 
-    const allUserClaims = await Claim.find(filter.$or ? { $or: filter.$or } : {}).select("status");
+    const rawClaims = await Claim.find(filter).sort({ createdAt: -1 });
+    const claims = rawClaims.map((c) => {
+      const obj = c.toObject();
+      obj.id = c._id.toString();
+      return obj;
+    });
+
+    const userBaseFilter = andConditions.length > 0 ? { $or: userMatches } : {};
+    const allUserClaims = await Claim.find(userBaseFilter).select("status");
 
     const counts = {
       all: allUserClaims.length,
@@ -230,3 +353,147 @@ export const rejectClaim = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// Get single claim by ID
+export const getClaimById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const claim = await Claim.findById(id);
+    if (!claim) {
+      return res.status(404).json({ success: false, message: "Claim not found" });
+    }
+    res.status(200).json({ success: true, data: claim });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update claim (e.g. proof, notes, status)
+export const updateClaim = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...req.body };
+
+    const claim = await Claim.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
+    if (!claim) {
+      return res.status(404).json({ success: false, message: "Claim not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Claim updated successfully",
+      data: claim,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Delete / Cancel claim
+export const deleteClaim = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const claim = await Claim.findByIdAndDelete(id);
+    if (!claim) {
+      return res.status(404).json({ success: false, message: "Claim not found" });
+    }
+
+    // Decrement claimCount on Item
+    if (claim.reportId) {
+      try {
+        await Item.findByIdAndUpdate(claim.reportId, { $inc: { claimCount: -1 } });
+      } catch {}
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Claim cancelled successfully",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Submit additional proof
+export const submitAdditionalProof = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { proofText } = req.body;
+
+    const claim = await Claim.findById(id);
+    if (!claim) {
+      return res.status(404).json({ success: false, message: "Claim not found" });
+    }
+
+    claim.status = "pending";
+    claim.statusLabel = "Under Review";
+    claim.statusDescription = "Additional details submitted! Finder is re-evaluating your ownership claim.";
+    claim.claimantProof.additionalProof = proofText || "";
+    claim.claimantProof.submittedAt = new Date();
+
+    claim.timeline.push({
+      step: claim.timeline.length + 1,
+      title: "Additional Details Provided",
+      time: "Just now",
+      description: proofText || "Additional verification proof attached.",
+      completed: true,
+      current: true,
+    });
+
+    await claim.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Additional proof submitted successfully",
+      data: claim,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Mark claim as reunited & returned
+export const markClaimReunited = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const claim = await Claim.findById(id);
+    if (!claim) {
+      return res.status(404).json({ success: false, message: "Claim not found" });
+    }
+
+    claim.status = "reunited";
+    claim.statusLabel = "Reunited & Returned";
+    claim.statusDescription = "Item was successfully handed over and verified by both parties.";
+    if (!claim.handover) claim.handover = {};
+    claim.handover.status = "completed";
+    claim.handover.completedAt = new Date();
+
+    claim.timeline.push({
+      step: claim.timeline.length + 1,
+      title: "Reunited & Confirmed",
+      time: "Just now",
+      description: "Both parties verified item return.",
+      completed: true,
+      current: true,
+    });
+
+    await claim.save();
+
+    // Mark the Item as resolved too
+    if (claim.reportId && String(claim.reportId).match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        await Item.findByIdAndUpdate(claim.reportId, { status: "resolved" });
+      } catch {}
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Claim marked as reunited",
+      data: claim,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+

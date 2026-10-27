@@ -3,12 +3,12 @@ import mongoose from "mongoose";
 const handoverSchema = new mongoose.Schema(
   {
     claimId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Claim",
       index: true,
     },
     reportId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Item",
       index: true,
     },
@@ -94,6 +94,11 @@ const handoverSchema = new mongoose.Schema(
     ratingsUnlocked: {
       type: Boolean,
       default: false,
+    },
+    isReviewed: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
     completedAt: {
       type: Date,

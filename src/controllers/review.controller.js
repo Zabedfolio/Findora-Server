@@ -1,4 +1,5 @@
 import Review from "../models/review.model.js";
+import Handover from "../models/handover.model.js";
 
 // Get reviews (public testimonials, user profile reviews, or admin moderation)
 export const getReviews = async (req, res) => {
@@ -72,7 +73,7 @@ export const getReviews = async (req, res) => {
   }
 };
 
-// Create a new review
+// Create a new verified review
 export const createReview = async (req, res) => {
   try {
     const { reviewer, targetUser, targetItem, handoverId, rating, comment } = req.body;
@@ -81,25 +82,113 @@ export const createReview = async (req, res) => {
       return res.status(400).json({ success: false, message: "Reviewer information is required" });
     }
     if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({ success: false, message: "Rating must be between 1 and 5" });
+      return res.status(400).json({ success: false, message: "Rating must be between 1 and 5 stars" });
     }
     if (!comment || comment.trim().length === 0) {
-      return res.status(400).json({ success: false, message: "Comment is required" });
+      return res.status(400).json({ success: false, message: "Review comment is required" });
     }
 
+    // Pipeline Check: Handover ID is required to verify custody exchange
+    if (!handoverId) {
+      return res.status(403).json({
+        success: false,
+        message: "Reviews can only be submitted for verified, completed handovers. No random reviews allowed.",
+      });
+    }
+
+    let handover = null;
+    if (typeof handoverId === "string" && handoverId.match(/^[0-9a-fA-F]{24}$/)) {
+      handover = await Handover.findById(handoverId);
+    } else {
+      handover = await Handover.findOne({ $or: [{ _id: handoverId }, { id: handoverId }] });
+    }
+
+    if (!handover) {
+      return res.status(404).json({
+        success: false,
+        message: "Associated handover record not found.",
+      });
+    }
+
+    // Pipeline Check 1: Handover must be completed and mutually confirmed by BOTH parties
+    const isOwnerConfirmed = Boolean(handover.confirmations?.ownerConfirmed);
+    const isFinderConfirmed = Boolean(handover.confirmations?.finderConfirmed);
+
+    if (handover.status !== "completed" || !isOwnerConfirmed || !isFinderConfirmed) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Handover exchange has not been mutually confirmed by both parties yet. Reviews unlock only after both parties verify completion.",
+      });
+    }
+
+    // Pipeline Check 2: Only the verified receiver (owner) can review the finder
+    const reviewerId = String(reviewer.userId || "").toLowerCase();
+    const reviewerEmail = String(reviewer.email || "").toLowerCase();
+    const ownerId = String(handover.owner?.userId || "").toLowerCase();
+    const ownerEmail = String(handover.owner?.email || "").toLowerCase();
+
+    const isAuthorizedReceiver =
+      (reviewerId && ownerId && reviewerId === ownerId) ||
+      (reviewerEmail && ownerEmail && reviewerEmail === ownerEmail);
+
+    if (!isAuthorizedReceiver) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Unauthorized: Only the verified receiver who received this item can submit a review for the finder.",
+      });
+    }
+
+    // Pipeline Check 3: Prevent duplicate reviews for the same exchange
+    const existingReview = await Review.findOne({
+      handoverId: handover._id,
+      "reviewer.userId": reviewer.userId,
+    });
+
+    if (existingReview || handover.isReviewed) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already submitted a verified review for this handover exchange.",
+      });
+    }
+
+    // Resolve target finder
+    const resolvedTargetUser = {
+      userId: handover.finder?.userId || targetUser?.userId || "",
+      name: handover.finder?.name || targetUser?.name || "Item Finder",
+      email: handover.finder?.email || targetUser?.email || "",
+    };
+
+    const resolvedTargetItem = {
+      itemId: handover.reportId || targetItem?.itemId || null,
+      title: handover.itemTitle || targetItem?.title || "Returned Item",
+    };
+
     const review = await Review.create({
-      reviewer,
-      targetUser: targetUser || {},
-      targetItem: targetItem || {},
-      handoverId: handoverId || null,
+      reviewer: {
+        userId: reviewer.userId,
+        name: reviewer.name,
+        email: reviewer.email || "",
+        avatar: reviewer.avatar || "/default-avatar.png",
+        role: "Verified Item Receiver",
+      },
+      targetUser: resolvedTargetUser,
+      targetItem: resolvedTargetItem,
+      handoverId: handover._id,
+      isVerifiedReturn: true,
       rating: Number(rating),
       comment: comment.trim(),
       status: "published",
     });
 
+    // Mark handover as reviewed
+    handover.isReviewed = true;
+    await handover.save();
+
     res.status(201).json({
       success: true,
-      message: "Review submitted successfully",
+      message: "Verified review submitted successfully! It now appears on the finder's public profile.",
       data: review,
     });
   } catch (error) {

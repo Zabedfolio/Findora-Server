@@ -15,12 +15,17 @@ const reviewSchema = new mongoose.Schema(
       email: { type: String, default: "" },
     },
     targetItem: {
-      itemId: { type: mongoose.Schema.Types.ObjectId, ref: "Item" },
+      itemId: { type: mongoose.Schema.Types.Mixed, ref: "Item" },
       title: { type: String, default: "" },
     },
     handoverId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Handover",
+      index: true,
+    },
+    isVerifiedReturn: {
+      type: Boolean,
+      default: true,
     },
     rating: {
       type: Number,
@@ -54,6 +59,7 @@ const reviewSchema = new mongoose.Schema(
 reviewSchema.index({ "reviewer.userId": 1 });
 reviewSchema.index({ "targetUser.userId": 1 });
 reviewSchema.index({ status: 1, createdAt: -1 });
+reviewSchema.index({ handoverId: 1, "reviewer.userId": 1 }, { unique: true, sparse: true });
 
 const Review = mongoose.models.Review || mongoose.model("Review", reviewSchema);
 export default Review;

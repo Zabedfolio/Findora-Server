@@ -40,8 +40,12 @@ const itemSchema = new mongoose.Schema(
     ],
     status: {
       type: String,
-      enum: ["active", "resolved", "claimed"],
+      enum: ["active", "resolved", "claimed", "lost", "found"],
       default: "active",
+    },
+    itemCurrentLocation: {
+      type: String,
+      default: "",
     },
     postedBy: {
       userId: { type: String, default: "" },
