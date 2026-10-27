@@ -8,6 +8,7 @@ import handoverRouter from './routes/handover.route.js'
 import reviewRouter from './routes/review.route.js'
 import fraudRouter from './routes/fraud.route.js'
 import notificationRouter from './routes/notification.route.js'
+import userRouter from './routes/user.route.js'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -30,6 +31,7 @@ app.use('/api/handovers', handoverRouter)
 app.use('/api/reviews', reviewRouter)
 app.use('/api/fraud', fraudRouter)
 app.use('/api/notifications', notificationRouter)
+app.use('/api/users', userRouter)
 
 app.listen(PORT, ()=> {
     console.log(`Server running on ${PORT}`);
