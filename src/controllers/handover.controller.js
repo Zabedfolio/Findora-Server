@@ -1,5 +1,6 @@
 import Handover from "../models/handover.model.js";
 import Item from "../models/item.model.js";
+import Claim from "../models/claim.model.js";
 
 // Get handovers (user-filtered or platform-wide for admin)
 export const getHandovers = async (req, res) => {
@@ -122,52 +123,151 @@ export const acceptProposal = async (req, res) => {
 export const confirmExchange = async (req, res) => {
   try {
     const { id } = req.params;
-    const { role } = req.body; // 'owner' | 'finder' | 'both'
+    const { role, userId, email, isAdmin } = req.body; // 'owner' | 'finder' | 'both'
 
     const handover = await Handover.findById(id);
     if (!handover) {
       return res.status(404).json({ success: false, message: "Handover record not found" });
     }
 
-    if (role === "owner" || role === "both") {
+    const normalizedRole = role === "receiver" ? "owner" : role;
+
+    // Check identity if role is specified
+    if (normalizedRole === "owner") {
       handover.confirmations.ownerConfirmed = true;
       handover.confirmations.ownerConfirmedAt = new Date();
-    }
-    if (role === "finder" || role === "both") {
+      handover.history.push({
+        at: new Date(),
+        by: handover.owner.name || "Receiver",
+        action: "Receiver confirmed physical receipt of the item.",
+      });
+    } else if (normalizedRole === "finder") {
       handover.confirmations.finderConfirmed = true;
       handover.confirmations.finderConfirmedAt = new Date();
+      handover.history.push({
+        at: new Date(),
+        by: handover.finder.name || "Finder",
+        action: "Finder confirmed physical handover of the item to receiver.",
+      });
+    } else if (normalizedRole === "both" && isAdmin) {
+      // Only platform admin can simultaneously confirm both
+      handover.confirmations.ownerConfirmed = true;
+      handover.confirmations.ownerConfirmedAt = new Date();
+      handover.confirmations.finderConfirmed = true;
+      handover.confirmations.finderConfirmedAt = new Date();
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid confirmation role. Must be 'owner' or 'finder'.",
+      });
     }
 
-    const isFullyCompleted = handover.confirmations.ownerConfirmed && handover.confirmations.finderConfirmed;
+    // STRICT CHECK: Both parties must click before custody is confirmed
+    const isFullyCompleted =
+      Boolean(handover.confirmations.ownerConfirmed) && Boolean(handover.confirmations.finderConfirmed);
+
     if (isFullyCompleted) {
       handover.status = "completed";
       handover.ratingsUnlocked = true;
       handover.completedAt = new Date();
       handover.history.push({
         at: new Date(),
-        by: "Both Parties",
-        action: "Both parties verified exchange! Handover completed.",
+        by: "Both Parties Verified",
+        action: "Mutual confirmation achieved! Safe handover completed. Rating unlocked for receiver.",
       });
 
       // Auto-resolve report if reportId is present
       if (handover.reportId) {
-        await Item.findByIdAndUpdate(handover.reportId, { status: "resolved" });
+        try {
+          await Item.findByIdAndUpdate(handover.reportId, { status: "resolved" });
+        } catch {}
+      }
+
+      // Auto-reunite claim if claimId is present
+      if (handover.claimId) {
+        try {
+          await Claim.findByIdAndUpdate(handover.claimId, {
+            status: "reunited",
+            statusLabel: "Reunited & Returned",
+            statusDescription: "Ownership verified and physical custody confirmed by both parties.",
+          });
+        } catch {}
       }
     } else {
-      handover.history.push({
-        at: new Date(),
-        by: role === "finder" ? "Finder" : "Owner",
-        action: `Signed delivery confirmation (${role}). Awaiting counterparty.`,
-      });
+      // Still in progress: explicitly keep ratings locked
+      handover.status = "confirmed";
+      handover.ratingsUnlocked = false;
     }
 
     await handover.save();
 
     res.status(200).json({
       success: true,
+      message: isFullyCompleted
+        ? "Handover mutually confirmed! Ratings unlocked."
+        : `Confirmed as ${normalizedRole === "owner" ? "Receiver" : "Finder"}. Awaiting other party confirmation.`,
       data: handover,
       isFullyCompleted,
     });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Check if a user is eligible to review a finder (must have completed, unreviewed handover as owner)
+export const getEligibleReviewHandover = async (req, res) => {
+  try {
+    const { targetUserId } = req.params;
+    const { reviewerId, email } = req.query;
+
+    if (!reviewerId && !email) {
+      return res.status(200).json({ success: true, eligible: false, message: "Missing reviewer information" });
+    }
+
+    const query = {
+      "finder.userId": targetUserId,
+      status: "completed",
+      "confirmations.ownerConfirmed": true,
+      "confirmations.finderConfirmed": true,
+      isReviewed: { $ne: true },
+    };
+
+    const userOr = [];
+    if (reviewerId) userOr.push({ "owner.userId": reviewerId });
+    if (email) userOr.push({ "owner.email": email.toLowerCase() });
+    query.$or = userOr;
+
+    const handover = await Handover.findOne(query).sort({ completedAt: -1 });
+
+    if (!handover) {
+      return res.status(200).json({
+        success: true,
+        eligible: false,
+        data: { eligible: false, handover: null },
+        message: "No unreviewed completed handovers found between this receiver and finder.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      eligible: true,
+      data: { eligible: true, handover },
+      handover,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get single handover by ID
+export const getHandoverById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover not found" });
+    }
+    res.status(200).json({ success: true, data: handover });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
