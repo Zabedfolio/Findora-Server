@@ -173,6 +173,10 @@ export const getAdminDashboardMetrics = async (req, res) => {
             { $sort: { createdAt: -1 } },
             { $limit: 10 },
           ],
+          allListings: [
+            { $sort: { date: -1 } },
+            { $limit: 100 },
+          ],
         },
       },
     ]);
@@ -212,6 +216,7 @@ export const getAdminDashboardMetrics = async (req, res) => {
           rate: loc.count > 0 ? Math.round((loc.resolved / loc.count) * 100) : 0,
         })),
         recentListings: overview?.recentListings || [],
+        allListings: overview?.allListings || [],
       },
     });
   } catch (error) {
