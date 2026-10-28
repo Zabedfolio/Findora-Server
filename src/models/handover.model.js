@@ -25,6 +25,10 @@ const handoverSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    handoverCode: {
+      type: String,
+      default: "",
+    },
     owner: {
       userId: { type: String, required: true, index: true },
       name: { type: String, required: true },
@@ -47,15 +51,15 @@ const handoverSchema = new mongoose.Schema(
     },
     meetingDate: {
       type: String,
-      required: true,
+      default: "",
     },
     timeSlot: {
       type: String,
-      required: true,
+      default: "",
     },
     location: {
       type: String,
-      required: true,
+      default: "",
     },
     safetyNote: {
       type: String,
@@ -63,9 +67,38 @@ const handoverSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["proposed", "confirmed", "completed", "reunited"],
-      default: "proposed",
+      enum: [
+        "pending_proposal",
+        "proposed",
+        "counter_proposed",
+        "confirmed",
+        "completed",
+        "reunited",
+        "cancelled",
+      ],
+      default: "pending_proposal",
       index: true,
+    },
+    counterProposal: {
+      meetingDate: { type: String, default: "" },
+      timeSlot: { type: String, default: "" },
+      location: { type: String, default: "" },
+      safetyNote: { type: String, default: "" },
+      suggestedBy: { type: String, default: "owner" },
+      suggestedAt: { type: Date, default: null },
+      status: { type: String, enum: ["pending", "accepted", "declined"], default: "pending" },
+    },
+    riskyLocationReports: [
+      {
+        reportedBy: { type: String },
+        role: { type: String },
+        reason: { type: String },
+        reportedAt: { type: Date, default: Date.now },
+      },
+    ],
+    hasWarning: {
+      type: Boolean,
+      default: false,
     },
     confirmations: {
       ownerConfirmed: { type: Boolean, default: false },
