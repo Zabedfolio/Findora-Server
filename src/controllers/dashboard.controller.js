@@ -147,20 +147,35 @@ export const getAdminDashboardMetrics = async (req, res) => {
           ],
           topLocations: [
             {
+              $match: {
+                location: { $exists: true, $ne: "" },
+              },
+            },
+            {
               $group: {
                 _id: "$location",
                 count: { $sum: 1 },
+                lost: {
+                  $sum: { $cond: [{ $eq: ["$type", "lost"] }, 1, 0] },
+                },
+                found: {
+                  $sum: { $cond: [{ $eq: ["$type", "found"] }, 1, 0] },
+                },
                 resolved: {
                   $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] },
                 },
               },
             },
             { $sort: { count: -1 } },
-            { $limit: 6 },
+            { $limit: 20 },
           ],
           recentListings: [
             { $sort: { createdAt: -1 } },
             { $limit: 10 },
+          ],
+          allListings: [
+            { $sort: { date: -1 } },
+            { $limit: 100 },
           ],
         },
       },
@@ -191,12 +206,17 @@ export const getAdminDashboardMetrics = async (req, res) => {
           resolved: cat.resolved,
         })),
         topLocations: (overview?.topLocations || []).map((loc) => ({
+          name: loc._id || "Dhaka Metropolitan",
           location: loc._id || "Dhaka Metropolitan",
-          count: loc.count,
-          resolved: loc.resolved,
+          lost: loc.lost || 0,
+          found: loc.found || 0,
+          total: loc.count || 0,
+          count: loc.count || 0,
+          resolved: loc.resolved || 0,
           rate: loc.count > 0 ? Math.round((loc.resolved / loc.count) * 100) : 0,
         })),
         recentListings: overview?.recentListings || [],
+        allListings: overview?.allListings || [],
       },
     });
   } catch (error) {

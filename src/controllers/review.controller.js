@@ -259,3 +259,22 @@ export const reportReview = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// Permanently delete a review (Admin action)
+export const deleteReview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const review = await Review.findByIdAndDelete(id);
+    if (!review) {
+      return res.status(404).json({ success: false, message: "Review not found" });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Review permanently deleted",
+    });
+  } catch (error) {
+    console.error("Delete review error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+

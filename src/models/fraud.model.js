@@ -59,7 +59,15 @@ const fraudCaseSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["investigating", "actioned", "dismissed"],
+      enum: [
+        "investigating",
+        "actioned",
+        "dismissed",
+        "warning_issued",
+        "suspended",
+        "banned",
+        "cleared",
+      ],
       default: "investigating",
       index: true,
     },
