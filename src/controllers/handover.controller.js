@@ -35,9 +35,20 @@ export const getHandovers = async (req, res) => {
 
     const all = await Handover.find(queryFilter).sort({ createdAt: -1 });
 
-    const upcoming = all.filter((h) => h.status === "proposed" || h.status === "confirmed");
+    const upcoming = all.filter(
+      (h) =>
+        h.status === "pending_proposal" ||
+        h.status === "proposed" ||
+        h.status === "counter_proposed" ||
+        h.status === "confirmed"
+    );
     const past = all.filter((h) => h.status === "completed" || h.status === "reunited");
-    const suspicious = all.filter((h) => (h.suspiciousFlags && h.suspiciousFlags.length > 0) || (h.adminWarnings && h.adminWarnings.length > 0));
+    const suspicious = all.filter(
+      (h) =>
+        (h.suspiciousFlags && h.suspiciousFlags.length > 0) ||
+        (h.adminWarnings && h.adminWarnings.length > 0) ||
+        h.hasWarning
+    );
 
     let filtered = all;
     if (filter === "upcoming") filtered = upcoming;
@@ -54,12 +65,230 @@ export const getHandovers = async (req, res) => {
         all: all.length,
         upcoming: upcoming.length,
         past: past.length,
+        pending_proposal: all.filter((h) => h.status === "pending_proposal").length,
         proposed: all.filter((h) => h.status === "proposed").length,
+        counter_proposed: all.filter((h) => h.status === "counter_proposed").length,
         confirmed: all.filter((h) => h.status === "confirmed").length,
         completed: past.length,
         suspicious: suspicious.length,
       },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Finder creates/proposes initial meeting schedule
+export const proposeHandover = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { meetingDate, timeSlot, location, safetyNote } = req.body;
+
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover record not found" });
+    }
+
+    const locLower = (location || "").toLowerCase();
+    const timeLower = (timeSlot || "").toLowerCase();
+    const flags = [];
+    if (locLower.includes("alley") || locLower.includes("depot") || locLower.includes("private") || locLower.includes("home")) {
+      flags.push("Non-public or isolated venue detected");
+    }
+    if (timeLower.includes("11:") || timeLower.includes("12:") || timeLower.includes("01:") || timeLower.includes("night") || timeLower.includes("midnight")) {
+      flags.push("Late night exchange scheduled");
+    }
+
+    handover.meetingDate = meetingDate || handover.meetingDate;
+    handover.timeSlot = timeSlot || handover.timeSlot;
+    handover.location = location || handover.location;
+    handover.safetyNote = safetyNote || "Always meet in a well-lit, public place under security surveillance.";
+    handover.proposedBy = "finder";
+    handover.status = "proposed";
+    if (flags.length > 0) {
+      handover.suspiciousFlags = Array.from(new Set([...(handover.suspiciousFlags || []), ...flags]));
+    }
+    handover.history.push({
+      at: new Date(),
+      by: "Finder",
+      action: `Finder created handover proposal: meeting at ${location} on ${meetingDate} (${timeSlot})`,
+    });
+
+    await handover.save();
+
+    if (handover.claimId) {
+      try {
+        await Claim.findByIdAndUpdate(handover.claimId, {
+          "handover.status": "ready",
+          "handover.locationName": location,
+          "handover.timeSlot": timeSlot,
+          statusLabel: "Handover Proposed",
+        });
+      } catch {}
+    }
+
+    res.status(200).json({ success: true, message: "Handover proposal sent to receiver", data: handover });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Receiver suggests alternative meeting details (counter-proposal)
+export const suggestAlternative = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { meetingDate, timeSlot, location, safetyNote, suggestedBy } = req.body;
+
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover record not found" });
+    }
+
+    const locLower = (location || "").toLowerCase();
+    const timeLower = (timeSlot || "").toLowerCase();
+    const flags = [];
+    if (locLower.includes("alley") || locLower.includes("depot") || locLower.includes("private") || locLower.includes("home")) {
+      flags.push("Non-public or isolated venue detected");
+    }
+    if (timeLower.includes("11:") || timeLower.includes("12:") || timeLower.includes("01:") || timeLower.includes("night") || timeLower.includes("midnight")) {
+      flags.push("Late night exchange scheduled");
+    }
+    if (flags.length > 0) {
+      handover.suspiciousFlags = Array.from(new Set([...(handover.suspiciousFlags || []), ...flags]));
+    }
+
+    handover.counterProposal = {
+      meetingDate: meetingDate || handover.meetingDate,
+      timeSlot: timeSlot || handover.timeSlot,
+      location: location || handover.location,
+      safetyNote: safetyNote || "Alternative schedule proposed by receiver.",
+      suggestedBy: suggestedBy || "owner",
+      suggestedAt: new Date(),
+      status: "pending",
+    };
+    handover.status = "counter_proposed";
+    handover.history.push({
+      at: new Date(),
+      by: "Receiver",
+      action: `Receiver proposed alternative: meeting at ${location} on ${meetingDate} (${timeSlot})`,
+    });
+
+    await handover.save();
+
+    res.status(200).json({ success: true, message: "Counter-proposal sent to finder", data: handover });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Finder accepts receiver's counter-proposal: updates schedule and confirms
+export const acceptCounterProposal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover record not found" });
+    }
+
+    if (!handover.counterProposal || handover.counterProposal.status !== "pending") {
+      return res.status(400).json({ success: false, message: "No pending counter-proposal to accept" });
+    }
+
+    // Update meeting details to receiver's suggested details!
+    handover.meetingDate = handover.counterProposal.meetingDate || handover.meetingDate;
+    handover.timeSlot = handover.counterProposal.timeSlot || handover.timeSlot;
+    handover.location = handover.counterProposal.location || handover.location;
+    if (handover.counterProposal.safetyNote) {
+      handover.safetyNote = handover.counterProposal.safetyNote;
+    }
+    handover.counterProposal.status = "accepted";
+    handover.status = "confirmed";
+
+    handover.history.push({
+      at: new Date(),
+      by: "Finder",
+      action: `Finder accepted receiver's alternative schedule! Meeting confirmed at ${handover.location} on ${handover.meetingDate} (${handover.timeSlot})`,
+    });
+
+    await handover.save();
+
+    if (handover.claimId) {
+      try {
+        await Claim.findByIdAndUpdate(handover.claimId, {
+          "handover.locationName": handover.location,
+          "handover.timeSlot": handover.timeSlot,
+          statusLabel: "Handover Confirmed",
+        });
+      } catch {}
+    }
+
+    res.status(200).json({ success: true, message: "Alternative schedule accepted and confirmed", data: handover });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Finder declines counter-proposal: keeps original details
+export const declineCounterProposal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover record not found" });
+    }
+
+    if (handover.counterProposal) {
+      handover.counterProposal.status = "declined";
+    }
+    handover.status = "proposed";
+    handover.history.push({
+      at: new Date(),
+      by: "Finder",
+      action: "Finder declined the alternative schedule. Original meeting proposal maintained.",
+    });
+
+    await handover.save();
+
+    res.status(200).json({ success: true, message: "Counter-proposal declined; original proposal maintained", data: handover });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Report risky meeting location to admin
+export const reportRiskyLocation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, role, userId } = req.body;
+
+    const handover = await Handover.findById(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover record not found" });
+    }
+
+    const reportObj = {
+      reportedBy: userId || "user",
+      role: role || "member",
+      reason: reason || "User flagged this meeting location as potentially unsafe or non-public.",
+      reportedAt: new Date(),
+    };
+
+    handover.riskyLocationReports = handover.riskyLocationReports || [];
+    handover.riskyLocationReports.push(reportObj);
+    handover.hasWarning = true;
+    handover.suspiciousFlags = Array.from(
+      new Set([...(handover.suspiciousFlags || []), `Risk reported by ${role || "party"}: ${reason || "Unsafe venue"}`])
+    );
+
+    handover.history.push({
+      at: new Date(),
+      by: role === "finder" ? "Finder" : "Receiver",
+      action: `Reported location safety concern to admin: "${reason || "Unsafe venue"}"`,
+    });
+
+    await handover.save();
+
+    res.status(200).json({ success: true, message: "Safety concern reported to Trust & Safety team", data: handover });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -112,6 +341,14 @@ export const acceptProposal = async (req, res) => {
     });
 
     await handover.save();
+
+    if (handover.claimId) {
+      try {
+        await Claim.findByIdAndUpdate(handover.claimId, {
+          statusLabel: "Handover Confirmed",
+        });
+      } catch {}
+    }
 
     res.status(200).json({ success: true, data: handover });
   } catch (error) {
@@ -303,6 +540,20 @@ export const sendAdminWarning = async (req, res) => {
     await handover.save();
 
     res.status(200).json({ success: true, data: handover, warning });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Delete handover
+export const deleteHandover = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const handover = await Handover.findByIdAndDelete(id);
+    if (!handover) {
+      return res.status(404).json({ success: false, message: "Handover not found" });
+    }
+    res.status(200).json({ success: true, message: "Handover deleted successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

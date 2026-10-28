@@ -37,13 +37,13 @@ export const createClaim = async (req, res) => {
           if (!claimData.location) {
             claimData.location = item.location || "";
           }
-          if (!claimData.finder || claimData.finder.userId === "usr_finder") {
+          if (item.postedBy) {
             claimData.finder = {
-              userId: item.postedBy?.userId || "finder",
-              name: item.postedBy?.name || "Item Finder",
-              email: item.postedBy?.email || "",
-              phone: item.contact?.phone || "",
-              avatar: item.postedBy?.image || "/default-avatar.png",
+              userId: item.postedBy.userId || item.postedBy._id || claimData.finder?.userId || "finder",
+              name: item.postedBy.name || claimData.finder?.name || "Item Finder",
+              email: item.postedBy.email || claimData.finder?.email || "",
+              phone: item.contact?.phone || claimData.finder?.phone || "",
+              avatar: item.postedBy.image || claimData.finder?.avatar || "/default-avatar.png",
             };
           }
         }
@@ -242,24 +242,29 @@ export const getMyClaims = async (req, res) => {
 export const approveClaim = async (req, res) => {
   try {
     const { id } = req.params;
-    const { note } = req.body;
+    const { note, meetingDate, timeSlot, location } = req.body;
 
     const claim = await Claim.findById(id);
     if (!claim) {
       return res.status(404).json({ success: false, message: "Claim not found" });
     }
 
+    const hasMeetingDetails = Boolean(meetingDate && timeSlot && location);
+    const initialStatus = hasMeetingDetails ? "proposed" : "pending_proposal";
+
     const generatedOtp = `FP-${Math.floor(1000 + Math.random() * 9000)}`;
     claim.status = "approved";
     claim.statusLabel = "Approved - Ready for Handover";
-    claim.statusDescription = "Finder verified your ownership claim! Safe handover ready.";
+    claim.statusDescription = hasMeetingDetails
+      ? "Finder verified your ownership claim! Safe handover schedule proposed."
+      : "Finder verified your claim! Waiting for finder to propose meeting details.";
     claim.reviewNotes = note || "Finder confirmed proof and authorized handover.";
     claim.handover = {
       isEligible: true,
-      status: "ready",
+      status: hasMeetingDetails ? "ready" : "pending_proposal",
       handoverCode: generatedOtp,
-      locationName: claim.location || "Designated Safe Exchange Spot",
-      timeSlot: "Coordinate with finder to finalize time",
+      locationName: location || claim.location || "",
+      timeSlot: timeSlot || "",
     };
 
     claim.timeline.push({
@@ -282,6 +287,7 @@ export const approveClaim = async (req, res) => {
         itemTitle: claim.itemTitle,
         itemCategory: claim.category,
         itemThumbnail: claim.itemThumbnail,
+        handoverCode: generatedOtp,
         owner: {
           userId: claim.claimant.userId,
           name: claim.claimant.name,
@@ -298,11 +304,20 @@ export const approveClaim = async (req, res) => {
           role: "finder",
         },
         proposedBy: "finder",
-        meetingDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0],
-        timeSlot: "Afternoon (03:30 PM - 05:00 PM)",
-        location: claim.location || "Police Station Lobby / Public Safe Spot",
-        safetyNote: note || "Meet inside public reception under security surveillance.",
-        status: "proposed",
+        meetingDate: meetingDate || "",
+        timeSlot: timeSlot || "",
+        location: location || "",
+        safetyNote: note || "Meet in a designated public safe zone.",
+        status: initialStatus,
+        history: [
+          {
+            at: new Date(),
+            by: "Finder",
+            action: hasMeetingDetails
+              ? `Finder verified claim and proposed meeting at ${location}`
+              : "Finder verified claim. Awaiting meeting schedule proposal.",
+          },
+        ],
       });
     }
 
@@ -404,6 +419,11 @@ export const deleteClaim = async (req, res) => {
         await Item.findByIdAndUpdate(claim.reportId, { $inc: { claimCount: -1 } });
       } catch {}
     }
+
+    // Clean up associated Handover records
+    try {
+      await Handover.deleteMany({ claimId: id });
+    } catch {}
 
     res.status(200).json({
       success: true,

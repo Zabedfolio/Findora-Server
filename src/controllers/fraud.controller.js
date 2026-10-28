@@ -143,11 +143,21 @@ export const updateFraudCaseStatus = async (req, res) => {
     const { id } = req.params;
     const { status, actionNotes, flagTargetUser } = req.body;
 
-    if (!["investigating", "actioned", "dismissed"].includes(status)) {
-      return res.status(400).json({ success: false, message: "Invalid status value" });
+    const allowedStatuses = [
+      "investigating",
+      "actioned",
+      "dismissed",
+      "warning_issued",
+      "suspended",
+      "banned",
+      "cleared",
+    ];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status value. Allowed: ${allowedStatuses.join(", ")}` });
     }
 
-    const fraudCase = await FraudCase.findById(id);
+    const query = mongoose.Types.ObjectId.isValid(id) ? { _id: id } : { caseId: id };
+    const fraudCase = await FraudCase.findOne(query);
     if (!fraudCase) {
       return res.status(404).json({ success: false, message: "Fraud case not found" });
     }
