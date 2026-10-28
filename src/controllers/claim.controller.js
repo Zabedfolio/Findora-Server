@@ -37,13 +37,13 @@ export const createClaim = async (req, res) => {
           if (!claimData.location) {
             claimData.location = item.location || "";
           }
-          if (!claimData.finder || claimData.finder.userId === "usr_finder") {
+          if (item.postedBy) {
             claimData.finder = {
-              userId: item.postedBy?.userId || "finder",
-              name: item.postedBy?.name || "Item Finder",
-              email: item.postedBy?.email || "",
-              phone: item.contact?.phone || "",
-              avatar: item.postedBy?.image || "/default-avatar.png",
+              userId: item.postedBy.userId || item.postedBy._id || claimData.finder?.userId || "finder",
+              name: item.postedBy.name || claimData.finder?.name || "Item Finder",
+              email: item.postedBy.email || claimData.finder?.email || "",
+              phone: item.contact?.phone || claimData.finder?.phone || "",
+              avatar: item.postedBy.image || claimData.finder?.avatar || "/default-avatar.png",
             };
           }
         }
